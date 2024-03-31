@@ -37,17 +37,6 @@ class AsyncRateLimiter:
         self.calls.append(datetime.now())
 
 
-def time_elapsed_decorator(func):
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)  # Execute the function
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        print(f"Time elapsed for '{func.__name__}': {elapsed_time:.4f} seconds")
-        return result
-    return wrapper
-
-
 # Handler function for all calls made to riot api
 async def handle_api_call(url):
     async with aiohttp.ClientSession() as session:
@@ -88,12 +77,17 @@ async def get_guilds():
     else:
         return list(documents)
 
-@time_elapsed_decorator
+
 async def cache_match_data(guilds):
     rate_limiter = AsyncRateLimiter(100, 120)
     collection = db.cached_match_data
     summoners_checked = []
     num_total_matches_cached = 0
+
+    job_start_time = datetime.now()
+    formatted_job_start_time = job_start_time.strftime("%m/%d/%y %H:%M:%S")
+
+    print(f"Caching all data from the last 30 days (Started at {formatted_job_start_time})...")
 
     for guild in guilds:
         summoners = await get_summoners(guild["guild_id"])  # Assume this is implemented
@@ -146,6 +140,14 @@ async def cache_match_data(guilds):
                 print(f"Already iterated through summoner {summoner["name"]}")
 
     print(f"{num_total_matches_cached} matches cached into cached_matches_data collection.")
+    job_end_time = datetime.now()
+    elapsed_time = job_end_time - job_start_time
+    elapsed_time_seconds = int(elapsed_time.total_seconds())
+    hours = elapsed_time_seconds // 3600
+    minutes = (elapsed_time_seconds % 3600) // 60
+    seconds = elapsed_time_seconds % 60
+    formatted_elapsed_time = f"{hours:02}:{minutes:02}:{seconds:02}"
+    print(f"\nDone caching all match data from the last 30 days. Took {formatted_elapsed_time}")
 
 if __name__ == "__main__":
     guilds = asyncio.run(get_guilds())
