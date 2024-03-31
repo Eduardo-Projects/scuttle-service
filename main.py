@@ -117,6 +117,7 @@ async def update_cached_data_timestamp(summoner):
     else:
         print(f'Modified last_cached document for {summoner["name"]}')
 
+
 async def check_if_cached_within_range(summoner, range=1):
     collection = db.cached_match_data_timestamps
     now = datetime.now(timezone.utc)
@@ -137,8 +138,21 @@ async def check_if_cached_within_range(summoner, range=1):
         
     return False
 
+
+# Removes extra participants data from match
+# This way each document in collection will contain summoner puuid and their individual performance
+def process_match_data(summoner_puuid, match_data):
+    processed_match_data = match_data.copy()
+
+    filtered_participants = [item for item in processed_match_data["info"]["participants"] if item['puuid'] == summoner_puuid]
+    processed_match_data["info"]["participants"] = filtered_participants
+    processed_match_data["summoner_puuid"] = summoner_puuid
+
+    return processed_match_data
+
+                              
 async def cache_match_data(guilds):
-    rate_limiter = AsyncRateLimiter(100, 120)
+    rate_limiter = AsyncRateLimiter(99, 120)
     collection = db.cached_match_data
     summoners_checked = []
     num_total_matches_cached = 0
@@ -197,13 +211,14 @@ async def cache_match_data(guilds):
                             if single_match_data:
                                 matches_cached += 1
                                 num_total_matches_cached += 1
-                                collection.insert_one(single_match_data)
+                                processed_match_data = process_match_data(summoner_puuid, match_data=single_match_data) 
+                                collection.insert_one(processed_match_data)
 
                     days_fetched += days_to_fetch
                 
                 summoners_checked.append(summoner)
                 await update_cached_data_timestamp(summoner)
-                print(f"{matches_cached} matches staged to be cached.")
+                print(f"{matches_cached} matches cached.")
             else:
                 print(f"Already iterated through summoner {summoner["name"]}")
 
@@ -218,4 +233,6 @@ async def cache_match_data(guilds):
     print(f"\nDone caching all match data from the last 30 days. Took {formatted_elapsed_time}")
 
 if __name__ == "__main__":
-    asyncio.run(run_at_start_of_next_hour())
+    # asyncio.run(run_at_start_of_next_hour())
+    guilds = asyncio.run(get_guilds())
+    asyncio.run(cache_match_data(guilds))
