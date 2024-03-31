@@ -78,6 +78,25 @@ async def get_guilds():
         return list(documents)
 
 
+async def run_at_start_of_next_hour():
+    while True:
+        # Calculate seconds until the next hour
+        now = datetime.now()
+        next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        wait_seconds = (next_hour - now).total_seconds()
+
+        # Wait until the start of the next hour
+        print(f"Waiting {wait_seconds} seconds until the next hour.")
+        await asyncio.sleep(wait_seconds)
+
+        # Run the main function
+        guilds = await get_guilds()
+        await cache_match_data(guilds)
+
+        # Now wait for one hour before the loop runs the main function again
+        await asyncio.sleep(3600)
+
+
 async def cache_match_data(guilds):
     rate_limiter = AsyncRateLimiter(100, 120)
     collection = db.cached_match_data
@@ -150,5 +169,4 @@ async def cache_match_data(guilds):
     print(f"\nDone caching all match data from the last 30 days. Took {formatted_elapsed_time}")
 
 if __name__ == "__main__":
-    guilds = asyncio.run(get_guilds())
-    asyncio.run(cache_match_data(guilds))
+    asyncio.run(run_at_start_of_next_hour())
