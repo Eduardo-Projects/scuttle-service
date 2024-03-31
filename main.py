@@ -2,10 +2,10 @@ from pymongo import MongoClient
 from dotenv import load_dotenv
 import certifi
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import aiohttp
 import asyncio
-import time 
+import pytz
 
 # Load environment variables from .env file
 load_dotenv()
@@ -56,7 +56,6 @@ async def handle_api_call(url):
 
 # Retrieves a list of all summoners for given discord server
 async def get_summoners(guild_id):
-    # Retrieve the document for the server
     collection = db.discord_servers
     document = collection.find_one({"guild_id": guild_id})
 
@@ -93,9 +92,50 @@ async def run_at_start_of_next_hour():
         guilds = await get_guilds()
         await cache_match_data(guilds)
 
-        # Now wait for one hour before the loop runs the main function again
         await asyncio.sleep(10)
 
+
+async def update_cached_data_timestamp(summoner):
+    collection = db.cached_match_data_timestamps
+    now = datetime.now(pytz.utc)
+
+    query = {'puuid': summoner["puuid"]}
+    update = {
+        '$set': {
+            'last_cached': now,
+        },
+        '$setOnInsert': {
+            'name': summoner["name"], # Set 'name' only if inserting a new document
+            'puuid': summoner["puuid"], # Set 'puuid' only if inserting a new document
+        }
+    }
+
+    result = collection.update_one(query, update, upsert=True)
+                                   
+    if result.upserted_id is not None:
+        print(f'Inserted a new last_cached document for {summoner["name"]}')
+    else:
+        print(f'Modified last_cached document for {summoner["name"]}')
+
+async def check_if_cached_within_range(summoner, range=1):
+    collection = db.cached_match_data_timestamps
+    now = datetime.now(timezone.utc)
+    lower_range = now - timedelta(days=range)
+    
+
+    document = collection.find_one({"puuid": summoner["puuid"]})
+
+    if not document:
+        print(f"{summoner["name"]} has no last cached data.")
+    else:
+        last_cached_date = document["last_cached"]
+        last_cached_date = pytz.utc.localize(last_cached_date)
+
+        if lower_range < last_cached_date < now:
+            print(f"{summoner["name"]}'s match data has been cached within the last {range} days.")
+            return True
+        
+    return False
 
 async def cache_match_data(guilds):
     rate_limiter = AsyncRateLimiter(100, 120)
@@ -109,14 +149,22 @@ async def cache_match_data(guilds):
     print(f"Caching all data from the last 30 days (Started at {formatted_job_start_time})...")
 
     for guild in guilds:
-        summoners = await get_summoners(guild["guild_id"])  # Assume this is implemented
+        summoners = await get_summoners(guild["guild_id"])
         for summoner in summoners:
             if summoner not in summoners_checked:
                 matches_cached = 0
                 days_fetched = 0
+                days_to_fetch_max = 30
                 summoner_puuid = summoner["puuid"]
-                while days_fetched < 30:
-                    days_to_fetch = min(5, 30 - days_fetched)
+
+                # check if summoner's data has been cached within the past day
+                # if so, only fetch data for the past day
+                was_cached_within_past_day = await check_if_cached_within_range(summoner, 1)
+                if was_cached_within_past_day:
+                    days_to_fetch_max = 1
+
+                while days_fetched < days_to_fetch_max:
+                    days_to_fetch = min(5, days_to_fetch_max - days_fetched)
                     end_time = datetime.today() - timedelta(days=days_fetched)
                     start_time = end_time - timedelta(days=days_to_fetch)
                     end_timestamp = int(end_time.timestamp())
@@ -154,6 +202,7 @@ async def cache_match_data(guilds):
                     days_fetched += days_to_fetch
                 
                 summoners_checked.append(summoner)
+                await update_cached_data_timestamp(summoner)
                 print(f"{matches_cached} matches staged to be cached.")
             else:
                 print(f"Already iterated through summoner {summoner["name"]}")
