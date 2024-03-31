@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timedelta
 import aiohttp
 import asyncio
+import time 
 
 # Load environment variables from .env file
 load_dotenv()
@@ -34,6 +35,17 @@ class AsyncRateLimiter:
         
         # Record the current call
         self.calls.append(datetime.now())
+
+
+def time_elapsed_decorator(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)  # Execute the function
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Time elapsed for '{func.__name__}': {elapsed_time:.4f} seconds")
+        return result
+    return wrapper
 
 
 # Handler function for all calls made to riot api
@@ -66,6 +78,7 @@ async def get_summoners(guild_id):
     return None
 
 
+# Retrieves a list of all guilds
 async def get_guilds():
     collection = db.discord_servers
     documents = collection.find()
@@ -75,12 +88,12 @@ async def get_guilds():
     else:
         return list(documents)
 
-
+@time_elapsed_decorator
 async def cache_match_data(guilds):
-    rate_limiter = AsyncRateLimiter(99, 120)
+    rate_limiter = AsyncRateLimiter(100, 120)
     collection = db.cached_match_data
-    matches_data = []
     summoners_checked = []
+    num_total_matches_cached = 0
 
     for guild in guilds:
         summoners = await get_summoners(guild["guild_id"])  # Assume this is implemented
@@ -122,25 +135,17 @@ async def cache_match_data(guilds):
 
                             if single_match_data:
                                 matches_cached += 1
-                                matches_data.append(single_match_data)
+                                num_total_matches_cached += 1
+                                collection.insert_one(single_match_data)
 
                     days_fetched += days_to_fetch
                 
                 summoners_checked.append(summoner)
-                print(f"{matches_cached} matches cached.")
+                print(f"{matches_cached} matches staged to be cached.")
             else:
                 print(f"Already iterated through summoner {summoner["name"]}")
-    
-    if not matches_data:
-        print("No matches were cached.")
-    else:
-        matches_cached = collection.insert_many(matches_data)
-        if not matches_cached:
-            print(f"Error caching the follwing matches: {matches_data}")
-        else:
-            print(f"Cached the following matches: {matches_data}")
 
-    print(len(matches_data))
+    print(f"{num_total_matches_cached} matches cached into cached_matches_data collection.")
 
 if __name__ == "__main__":
     guilds = asyncio.run(get_guilds())
