@@ -86,7 +86,7 @@ async def run_at_start_of_next_hour():
         wait_seconds = (next_hour - now).total_seconds()
 
         # Wait until the start of the next hour
-        print(f"Waiting {wait_seconds} seconds until the next hour.")
+        print(f"Waiting {next_hour - now} until the next hour.")
         await asyncio.sleep(wait_seconds)
 
         # Run the main function
