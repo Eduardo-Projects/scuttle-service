@@ -94,7 +94,7 @@ async def run_at_start_of_next_hour():
         await cache_match_data(guilds)
 
         # Now wait for one hour before the loop runs the main function again
-        await asyncio.sleep(3600)
+        await asyncio.sleep(10)
 
 
 async def cache_match_data(guilds):
