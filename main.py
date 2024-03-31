@@ -233,6 +233,4 @@ async def cache_match_data(guilds):
     print(f"\nDone caching all match data from the last 30 days. Took {formatted_elapsed_time}")
 
 if __name__ == "__main__":
-    # asyncio.run(run_at_start_of_next_hour())
-    guilds = asyncio.run(get_guilds())
-    asyncio.run(cache_match_data(guilds))
+    asyncio.run(run_at_start_of_next_hour())
