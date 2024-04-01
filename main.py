@@ -14,6 +14,9 @@ client = MongoClient(os.getenv("MONGO_DB_URI"), tlsCAFile=ca)
 db = client["league_discord_bot"]
 
 
+# Object for handling rate limits, mainly for communicating with Riot's API.
+# Keeps track of how many calls have been made over a certain period and
+# sleeps for necessary time when max calls is reached.
 class AsyncRateLimiter:
     def __init__(self, max_calls, period):
         self.max_calls = max_calls
@@ -37,7 +40,8 @@ class AsyncRateLimiter:
         self.calls.append(datetime.now())
 
 
-# Handler function for all calls made to riot api
+# Handler function for all API calls made
+# Contains error handling and backup rate limit handling
 async def handle_api_call(url):
     async with aiohttp.ClientSession() as session:
         try:
@@ -54,7 +58,8 @@ async def handle_api_call(url):
             print(f"Error in API call: {e.status}, message='{e.message}'")
             return None
 
-# Retrieves a list of all summoners for given discord server
+
+# Returns a list of all summoners in a given Guild (discord server)
 async def get_summoners(guild_id):
     collection = db.discord_servers
     document = collection.find_one({"guild_id": guild_id})
@@ -66,7 +71,7 @@ async def get_summoners(guild_id):
     return None
 
 
-# Retrieves a list of all guilds
+# Returns a list of all guilds stored within Scuttle's database
 async def get_guilds():
     collection = db.discord_servers
     documents = collection.find()
@@ -77,6 +82,7 @@ async def get_guilds():
         return list(documents)
 
 
+# Handler function to run script once every hour on the hour
 async def run_at_start_of_next_hour():
     while True:
         # Calculate seconds until the next hour
@@ -95,6 +101,7 @@ async def run_at_start_of_next_hour():
         await asyncio.sleep(10)
 
 
+# Updates summoner's last time cached data in database
 async def update_cached_data_timestamp(summoner):
     collection = db.cached_match_data_timestamps
     now = datetime.now(pytz.utc)
@@ -118,6 +125,7 @@ async def update_cached_data_timestamp(summoner):
         print(f'Modified last_cached document for {summoner["name"]}')
 
 
+# Checks if summoner's match history has already been cached within range
 async def check_if_cached_within_range(summoner, range=1):
     collection = db.cached_match_data_timestamps
     now = datetime.now(timezone.utc)
@@ -150,7 +158,9 @@ def process_match_data(summoner_puuid, match_data):
 
     return processed_match_data
 
-                              
+
+# Fetches and caches all match history for all summoner's in Scuttle's database
+# Stores the last 30 days worth of match data for all summoners
 async def cache_match_data(guilds):
     rate_limiter = AsyncRateLimiter(99, 120)
     collection = db.cached_match_data
