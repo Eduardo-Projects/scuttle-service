@@ -174,65 +174,68 @@ async def cache_match_data(guilds):
 
     for guild in guilds:
         summoners = await get_summoners(guild["guild_id"])
-        for summoner in summoners:
-            if summoner not in summoners_checked:
-                matches_cached = 0
-                days_fetched = 0
-                days_to_fetch_max = 30
-                summoner_puuid = summoner["puuid"]
+        if(summoners):
+            for summoner in summoners:
+                if summoner not in summoners_checked:
+                    matches_cached = 0
+                    days_fetched = 0
+                    days_to_fetch_max = 30
+                    summoner_puuid = summoner["puuid"]
 
-                # check if summoner's data has been cached within the past day
-                # if so, only fetch data for the past day
-                was_cached_within_past_day = await check_if_cached_within_range(summoner, 1)
-                if was_cached_within_past_day:
-                    days_to_fetch_max = 1
+                    # check if summoner's data has been cached within the past day
+                    # if so, only fetch data for the past day
+                    was_cached_within_past_day = await check_if_cached_within_range(summoner, 1)
+                    if was_cached_within_past_day:
+                        days_to_fetch_max = 1
 
-                while days_fetched < days_to_fetch_max:
-                    days_to_fetch = min(5, days_to_fetch_max - days_fetched)
-                    end_time = datetime.today() - timedelta(days=days_fetched)
-                    start_time = end_time - timedelta(days=days_to_fetch)
-                    end_timestamp = int(end_time.timestamp())
-                    start_timestamp = int(start_time.timestamp())
+                    while days_fetched < days_to_fetch_max:
+                        days_to_fetch = min(5, days_to_fetch_max - days_fetched)
+                        end_time = datetime.today() - timedelta(days=days_fetched)
+                        start_time = end_time - timedelta(days=days_to_fetch)
+                        end_timestamp = int(end_time.timestamp())
+                        start_timestamp = int(start_time.timestamp())
+                        
+                        print(f"Fetching matches from {start_time.strftime('%Y-%m-%d')} to {end_time.strftime('%Y-%m-%d')} for summoner {summoner["name"]}.")
+
+                        url = f"https://americas.api.riotgames.com/lol/match/v5/matches/by-puuid/{summoner_puuid}/ids?startTime={start_timestamp}&endTime={end_timestamp}&queue=420&start=0&count=100&api_key={os.getenv('RIOT_API_KEY')}"
+                        await rate_limiter.wait()
+                        match_ids = await handle_api_call(url)
+
+                        # Find documents where `metadata.matchId` is in list of match IDs
+                        matched_documents = collection.find({"metadata.matchId": {"$in": match_ids}})
+
+                        # Extract the matched IDs
+                        matched_ids = [doc['metadata']['matchId'] for doc in matched_documents]
+
+                        # Filter your list to remove the matched IDs
+                        unmatched_ids = [mid for mid in match_ids if mid not in matched_ids]
+
+                        print(f"Matches already cached: {matched_ids}")
+                        print(f"Matches being cached: {unmatched_ids}")
+
+                        if unmatched_ids:
+                            for match_id in unmatched_ids:
+                                match_url = f"https://americas.api.riotgames.com/lol/match/v5/matches/{match_id}?api_key={os.getenv('RIOT_API_KEY')}"
+                                await rate_limiter.wait()
+                                single_match_data = await handle_api_call(match_url)
+
+                                if single_match_data:
+                                    matches_cached += 1
+                                    num_total_matches_cached += 1
+                                    processed_match_data = process_match_data(summoner_puuid, match_data=single_match_data) 
+                                    collection.insert_one(processed_match_data)
+
+                        days_fetched += days_to_fetch
                     
-                    print(f"Fetching matches from {start_time.strftime('%Y-%m-%d')} to {end_time.strftime('%Y-%m-%d')} for summoner {summoner["name"]}.")
+                    summoners_checked.append(summoner)
+                    await update_cached_data_timestamp(summoner)
+                    print(f"{matches_cached} matches cached.")
+                else:
+                    print(f"Already iterated through summoner {summoner["name"]}")
+        else:
+            print(f"Guild {guild["name"]} does not have any summoners. Skipping.")
 
-                    url = f"https://americas.api.riotgames.com/lol/match/v5/matches/by-puuid/{summoner_puuid}/ids?startTime={start_timestamp}&endTime={end_timestamp}&queue=420&start=0&count=100&api_key={os.getenv('RIOT_API_KEY')}"
-                    await rate_limiter.wait()
-                    match_ids = await handle_api_call(url)
-
-                    # Find documents where `metadata.matchId` is in list of match IDs
-                    matched_documents = collection.find({"metadata.matchId": {"$in": match_ids}})
-
-                    # Extract the matched IDs
-                    matched_ids = [doc['metadata']['matchId'] for doc in matched_documents]
-
-                    # Filter your list to remove the matched IDs
-                    unmatched_ids = [mid for mid in match_ids if mid not in matched_ids]
-
-                    print(f"Matches already cached: {matched_ids}")
-                    print(f"Matches being cached: {unmatched_ids}")
-
-                    if unmatched_ids:
-                        for match_id in unmatched_ids:
-                            match_url = f"https://americas.api.riotgames.com/lol/match/v5/matches/{match_id}?api_key={os.getenv('RIOT_API_KEY')}"
-                            await rate_limiter.wait()
-                            single_match_data = await handle_api_call(match_url)
-
-                            if single_match_data:
-                                matches_cached += 1
-                                num_total_matches_cached += 1
-                                processed_match_data = process_match_data(summoner_puuid, match_data=single_match_data) 
-                                collection.insert_one(processed_match_data)
-
-                    days_fetched += days_to_fetch
-                
-                summoners_checked.append(summoner)
-                await update_cached_data_timestamp(summoner)
-                print(f"{matches_cached} matches cached.")
-            else:
-                print(f"Already iterated through summoner {summoner["name"]}")
-
-    print(f"{num_total_matches_cached} matches cached into cached_matches_data collection.")
+    print(f"\n{num_total_matches_cached} matches cached into cached_matches_data collection.")
     job_end_time = datetime.now()
     elapsed_time = job_end_time - job_start_time
     elapsed_time_seconds = int(elapsed_time.total_seconds())
@@ -240,7 +243,9 @@ async def cache_match_data(guilds):
     minutes = (elapsed_time_seconds % 3600) // 60
     seconds = elapsed_time_seconds % 60
     formatted_elapsed_time = f"{hours:02}:{minutes:02}:{seconds:02}"
-    print(f"\nDone caching all match data from the last 30 days. Took {formatted_elapsed_time}")
+    print(f"Done caching all match data from the last 30 days. Took {formatted_elapsed_time}")
 
 if __name__ == "__main__":
+    # guilds = asyncio.run(get_guilds())
+    # asyncio.run(cache_match_data(guilds))
     asyncio.run(run_at_start_of_next_hour())
