@@ -158,6 +158,22 @@ def process_match_data(summoner_puuid, match_data):
 
     return processed_match_data
 
+def get_area_from_region(region): 
+    americas = ["br1", "la1","la2","na1"]
+    asia = ["jp1", "kr"]
+    europe = ["euw1", "eun1", "tr1", "ru"]
+    sea = ["oc1", "ph2", "sg2", "th2", "tw2", "vn2"]
+
+    if region in americas:
+        return "americas"
+    elif region in asia:
+        return "asia"
+    elif region in europe:
+        return "europe"
+    elif region in sea:
+        return "sea"
+
+
 
 # Fetches and caches all match history for all summoner's in Scuttle's database
 # Stores the last 30 days worth of match data for all summoners
@@ -197,12 +213,17 @@ async def cache_match_data(guilds):
                         
                         print(f"Fetching matches from {start_time.strftime('%Y-%m-%d')} to {end_time.strftime('%Y-%m-%d')} for summoner {summoner["name"]}.")
 
-                        url = f"https://americas.api.riotgames.com/lol/match/v5/matches/by-puuid/{summoner_puuid}/ids?startTime={start_timestamp}&endTime={end_timestamp}&queue=420&start=0&count=100&api_key={os.getenv('RIOT_API_KEY')}"
+                        if "region" in summoner:
+                            area = get_area_from_region(summoner["region"])
+                        else:
+                            area = "americas"
+
+                        url = f"https://{area}.api.riotgames.com/lol/match/v5/matches/by-puuid/{summoner_puuid}/ids?startTime={start_timestamp}&endTime={end_timestamp}&queue=420&start=0&count=100&api_key={os.getenv('RIOT_API_KEY')}"
                         await rate_limiter.wait()
                         match_ids = await handle_api_call(url)
 
                         # Find documents where `metadata.matchId` is in list of match IDs
-                        matched_documents = collection.find({"metadata.matchId": {"$in": match_ids}})
+                        matched_documents = collection.find({"metadata.matchId": {"$in": match_ids}, "summoner_puuid": summoner_puuid})
 
                         # Extract the matched IDs
                         matched_ids = [doc['metadata']['matchId'] for doc in matched_documents]
@@ -215,7 +236,7 @@ async def cache_match_data(guilds):
 
                         if unmatched_ids:
                             for match_id in unmatched_ids:
-                                match_url = f"https://americas.api.riotgames.com/lol/match/v5/matches/{match_id}?api_key={os.getenv('RIOT_API_KEY')}"
+                                match_url = f"https://{area}.api.riotgames.com/lol/match/v5/matches/{match_id}?api_key={os.getenv('RIOT_API_KEY')}"
                                 await rate_limiter.wait()
                                 single_match_data = await handle_api_call(match_url)
 
@@ -224,6 +245,9 @@ async def cache_match_data(guilds):
                                     num_total_matches_cached += 1
                                     processed_match_data = process_match_data(summoner_puuid, match_data=single_match_data) 
                                     collection.insert_one(processed_match_data)
+
+                        if "region" in summoner:
+                             print(f"Pulled matches from {area} Area for summer from {summoner["region"]} region")
 
                         days_fetched += days_to_fetch
                     
