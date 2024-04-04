@@ -158,6 +158,7 @@ def process_match_data(summoner_puuid, match_data):
 
     return processed_match_data
 
+
 def get_area_from_region(region): 
     americas = ["br1", "la1","la2","na1"]
     asia = ["jp1", "kr"]
@@ -247,7 +248,7 @@ async def cache_match_data(guilds):
                                     collection.insert_one(processed_match_data)
 
                         if "region" in summoner:
-                             print(f"Pulled matches from {area} Area for summer from {summoner["region"]} region")
+                             print(f"Pulled matches from '{area}' area for summer from {summoner["region"]} region")
 
                         days_fetched += days_to_fetch
                     
