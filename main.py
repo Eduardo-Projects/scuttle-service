@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import aiohttp
 import asyncio
 import pytz
+import re
 
 # Load environment variables from .env file
 load_dotenv()
@@ -173,13 +174,61 @@ def get_area_from_region(region):
         return "europe"
     elif region in sea:
         return "sea"
+    
+# Checks to make sure provided riot id follows format: 'String1 #String2'
+# Keep in mind there can be any number of strings before the #
+def check_riot_id_format(riot_id):
+    pattern = r'^[\w]+(?:\s[\w]+)*\s#[\w]+$'
+
+    if re.match(pattern, riot_id):
+        return True
+    else:
+        return False
+
+    
+# Fetches a summoner's puuid from their riot id
+# Checks if riot id is in proper format
+async def fetch_summoner_puuid_by_riot_id(summoner_riot_id):
+    is_proper_format = check_riot_id_format(summoner_riot_id)
+
+    if is_proper_format:
+        game_name, tag = summoner_riot_id.split(" #")
+        url = f"https://americas.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{game_name}/{tag}?api_key={os.getenv("RIOT_API_KEY")}"
+        data = await handle_api_call(url)
+        return data["puuid"] if data is not None else None
+    else:
+        print(f"Failed to fetch summoner puuid. {summoner_riot_id} is not a valid Riot ID.")
+        return None
+
+
+# Updates summoner's puuid to match the production key
+async def update_all_puuids():
+    collection = db.discord_servers
+
+    documents = collection.find()
+
+    # Iterate through each document
+    for doc in documents:
+        # Check if 'summoners' field exists
+        if 'summoners' in doc:
+            # Iterate through each summoner in the document
+            for summoner in doc['summoners']:
+                # Generate or determine the new puuid (this part is up to you)
+                new_puuid = await fetch_summoner_puuid_by_riot_id(summoner["name"])  # You need to implement this function
+
+                # Update the puuid of the current summoner
+                collection.update_one(
+                    {'_id': doc['_id'], 'summoners.name': summoner['name']},
+                    {'$set': {'summoners.$.puuid': new_puuid}}
+                )
+                print(f"Updated puuid for {summoner['name']} in guild {doc.get('guild_id')}")
 
 
 
 # Fetches and caches all match history for all summoner's in Scuttle's database
 # Stores the last 30 days worth of match data for all summoners
 async def cache_match_data(guilds):
-    rate_limiter = AsyncRateLimiter(99, 120)
+    rate_limiter = AsyncRateLimiter(29999, 600)
     collection = db.cached_match_data
     summoners_checked = []
     num_total_matches_cached = 0
@@ -271,6 +320,7 @@ async def cache_match_data(guilds):
     print(f"Done caching all match data from the last 30 days. Took {formatted_elapsed_time}")
 
 if __name__ == "__main__":
-    # guilds = asyncio.run(get_guilds())
-    # asyncio.run(cache_match_data(guilds))
+    # asyncio.run(update_all_puuids())
+    guilds = asyncio.run(get_guilds())
+    asyncio.run(cache_match_data(guilds))
     asyncio.run(run_at_start_of_next_hour())
