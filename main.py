@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import aiohttp
 import asyncio
 import pytz
+import ssl
 
 # Load environment variables from .env file
 load_dotenv()
@@ -43,9 +44,10 @@ class AsyncRateLimiter:
 # Handler function for all API calls made
 # Contains error handling and backup rate limit handling
 async def handle_api_call(url):
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url) as response:
+            async with session.get(url, ssl=ssl_context) as response:
                 if response.status == 429:  # Rate limit exceeded
                     retry_after = int(response.headers.get("Retry-After", 1))
                     print(f"Rate limit exceeded. Retrying in {retry_after} seconds.")
